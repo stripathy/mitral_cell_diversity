@@ -1,0 +1,266 @@
+function [xcorrs, acorrs1, acorrs2, xcorrsPairwise, autoCorrs]=crossCorrAllCells(spikeMat, trialsPerNeuron, tmax)
+% Inputs: spikeMat- matrix of spiketimes transposed like how it usually is
+% trialsPerNeuron- vector with number of trials per neuron (needs to be
+% same for all neurons)
+% tmax - max time for each trial
+% Outputs: xcorrs- matrix of numCells x corrTPts, where each 
+
+%for now all trials per neuron need to be the same
+
+numTrials = trialsPerNeuron(1);
+numCells = length(trialsPerNeuron);
+
+% numTrials=size(ST1,1);
+
+span=50;
+pad=0;
+timeOffset = 0;
+corrFxnLen = span*2+1;
+
+autoCorrs = zeros(numCells, span*2+1);
+ac1=zeros(1,corrFxnLen);
+ac2=zeros(1,corrFxnLen);
+xc1=zeros(1,corrFxnLen);
+xc2=zeros(1,corrFxnLen);
+xc = zeros(1,span*2+1);
+xcorrs = zeros(numCells, corrFxnLen);
+
+ac1all=zeros(numTrials,span*2+1);
+ac2all=zeros(numTrials,span*2+1);
+xcall=zeros(numTrials,span*2+1);
+
+inst = zeros(numTrials*numCells,tmax, 1);
+inst1=zeros(numTrials,tmax);
+inst2=zeros(numTrials,tmax);
+
+% convert spike times to binned spikes (binned at 1 ms)
+roundSpikeMat = round(spikeMat);
+for i = 1:size(spikeMat,1)
+    inst(i,nonzeros(roundSpikeMat(i,:))) = 1;
+end
+if pad > 0
+    inst = conv2(inst, ones(1,length(-pad:pad)), 'same');
+end
+
+%compute cross correlation of a cell to itself across trials
+parfor i = 1:numCells
+    cellSpikeInds = (i-1)*numTrials + 1:i*numTrials;
+    spikeInds1 = randsample(cellSpikeInds, numTrials/2); %split trials in half randomly
+    spikeInds2 = setxor(cellSpikeInds, spikeInds1);
+    
+    spikes1 = spikeMat(spikeInds1,:);
+    spikes2 = spikeMat(spikeInds2,:);
+    currInst1 = inst(spikeInds1,:);
+    currInst2 = inst(spikeInds2,:);
+    
+    ac1=zeros(1,corrFxnLen);
+    ac2=zeros(1,corrFxnLen);
+    xc1=zeros(1,corrFxnLen);
+    xc2=zeros(1,corrFxnLen);
+    
+    numComps = (numTrials/2)*(numTrials/2);
+    tempCnt = 0;
+    for j = 1:numTrials/2
+        %         currSpikeInd1 = (i-1)*numTrials + j;
+        for k = 1:numTrials/2
+            
+            if nnz(spikes1(j,:))>0
+                
+                div1=sum(spikes1(j,:)>(timeOffset) & spikes1(j,:)<(tmax));
+                div2=sum(spikes2(k,:)>(timeOffset) & spikes2(k,:)<(tmax));
+                for dd=1:nnz(spikes1(j,:))
+                    time=round(spikes1(j,dd));
+                    
+                    if time>=(timeOffset) && time<=(tmax)
+                        windowInds = time-span:time+span;
+                        inds1 = makeValidInds(windowInds,tmax);
+                        corrInds = windowInds(windowInds>0 & windowInds <=tmax) - time + span+1;
+                        
+                        ac1(corrInds)=ac1(corrInds)+(currInst1(j,inds1)-mean(currInst1(j,inds1)))/(div1*numComps);
+                        %                         ac1all(j,corrInds)=ac1all(j,corrInds)+(inst1(j,inds1)-mean(inst1(j,inds1)))/(div1);
+                        if nnz(currInst2(k,inds1))>0
+                            xc1(corrInds)=xc1(corrInds)+(currInst2(k,inds1)-(mean(currInst2(k,inds1))))/(div2*numComps);
+                            %                             xcall(k,corrInds)=xcall(k,corrInds)+(inst2(k,inds1)-(mean(inst2(k,inds1))))/(div2);
+                        end
+                    end
+                end
+            end
+            tempCnt = tempCnt + 1;
+            
+            if nnz(spikes2(j,:))>0
+                div1=sum(spikes2(j,:)>(timeOffset) & spikes2(j,:)<(tmax));
+                div2=sum(spikes1(k,:)>(timeOffset) & spikes1(k,:)<(tmax));
+                
+                for dd=1:nnz(spikes2(j,:))
+                    time=round(spikes2(j,dd));
+                    
+                    if time>=(timeOffset) && time<=(tmax)
+                        windowInds = time-span:time+span;
+                        inds1 = makeValidInds(windowInds,tmax);
+                        corrInds = windowInds(windowInds>0 & windowInds <=tmax) - time + span+1;
+                        
+                        ac2(corrInds)=ac2(corrInds)+(currInst2(j,inds1)-mean(currInst2(j,inds1)))/(div1*numComps);
+                        %                         ac2all(aa,corrInds)=ac2all(aa,corrInds)+(inst2(aa,inds1)-mean(inst2(aa,inds1)))/(div1);
+                        if nnz(currInst1(k,inds1))>0
+                            xc2(corrInds)=xc2(corrInds)+(currInst1(k,inds1)-mean(currInst1(k,inds1)))/(div2*numComps);
+                            %                             xcall(aa,corrInds)=xcall(aa,corrInds)+(inst1(aa,inds1)-mean(inst1(aa,inds1)))/(div2);
+                        end
+                    end
+                end
+            end
+            
+        end
+    end
+    acorrs1(i,:) = ac1;
+    acorrs2(i,:) = ac2;
+    autoCorrs(i,:) = (ac1+ac2)/2;
+    xcorrs(i,:) = (xc1+xc2)/2;
+end
+
+cnt = 1;
+for i = 1:numCells
+    for j = 1:numCells
+        cellPairs(1,cnt) = i;
+        cellPairs(2, cnt) = j;
+        cnt = cnt + 1;
+    end
+end
+
+%compute cross correlation of a cell to itself across trials
+xcorrsPairwise = zeros(length(cellPairs), corrFxnLen);
+parfor i = 1:length(cellPairs)
+    cellInd1 = cellPairs(1,i);
+    cellInd2 = cellPairs(2,i);
+    if cellInd1==cellInd2
+        continue;
+    end
+    
+    cellSpikeInds1 = (cellInd1-1)*numTrials + 1:cellInd1*numTrials;
+    spikes1 = spikeMat(cellSpikeInds1,:);
+    currInst1 = inst(cellSpikeInds1,:);
+    cellSpikeInds2 = (cellInd2-1)*numTrials + 1:cellInd2*numTrials;
+    spikes2 = spikeMat(cellSpikeInds2,:);
+    currInst2 = inst(cellSpikeInds2,:);
+    
+    xc1=zeros(1,corrFxnLen);
+    %     xc2=zeros(1,corrFxnLen);
+    
+    numComps = (numTrials)*(numTrials);
+    
+    for j = 1:numTrials
+        %         currSpikeInd1 = (i-1)*numTrials + j;
+        for k = 1:numTrials
+            
+            if nnz(spikes1(j,:))>0
+                
+                div1=sum(spikes1(j,:)>(timeOffset) & spikes1(j,:)<(tmax));
+                div2=sum(spikes2(k,:)>(timeOffset) & spikes2(k,:)<(tmax));
+                for dd=1:nnz(spikes1(j,:))
+                    time=round(spikes1(j,dd));
+                    
+                    if time>=(timeOffset) && time<=(tmax)
+                        windowInds = time-span:time+span;
+                        inds1 = makeValidInds(windowInds,tmax);
+                        corrInds = windowInds(windowInds>0 & windowInds <=tmax) - time + span+1;
+                        
+                        %                         ac1(corrInds)=ac1(corrInds)+(currInst1(j,inds1)-mean(currInst1(j,inds1)))/(div1*numComps);
+                        %                         ac1all(j,corrInds)=ac1all(j,corrInds)+(inst1(j,inds1)-mean(inst1(j,inds1)))/(div1);
+                        if nnz(currInst2(k,inds1))>0
+                            xc1(corrInds)=xc1(corrInds)+(currInst2(k,inds1)-(mean(currInst2(k,inds1))))/(div2*numComps);
+                            %                             xcall(k,corrInds)=xcall(k,corrInds)+(inst2(k,inds1)-(mean(inst2(k,inds1))))/(div2);
+                        end
+                    end
+                end
+            end
+            
+            %             if nnz(spikes2(j,:))>0
+            %                 div1=sum(spikes2(j,:)>(timeOffset) & spikes2(j,:)<(tmax));
+            %                 div2=sum(spikes1(k,:)>(timeOffset) & spikes1(k,:)<(tmax));
+            %
+            %                 for dd=1:nnz(spikes2(j,:))
+            %                     time=round(spikes2(j,dd));
+            %
+            %                     if time>=(timeOffset) && time<=(tmax)
+            %                         windowInds = time-span:time+span;
+            %                         inds1 = makeValidInds(windowInds,tmax);
+            %                         corrInds = windowInds(windowInds>0 & windowInds <=tmax) - time + span+1;
+            %
+            %                         ac2(corrInds)=ac2(corrInds)+(currInst2(j,inds1)-mean(currInst2(j,inds1)))/(div1*numComps);
+            % %                         ac2all(aa,corrInds)=ac2all(aa,corrInds)+(inst2(aa,inds1)-mean(inst2(aa,inds1)))/(div1);
+            %                         if nnz(currInst1(k,inds1))>0
+            %                             xc2(corrInds)=xc2(corrInds)+(currInst1(k,inds1)-mean(currInst1(k,inds1)))/(div2*numComps);
+            % %                             xcall(aa,corrInds)=xcall(aa,corrInds)+(inst1(aa,inds1)-mean(inst1(aa,inds1)))/(div2);
+            %                         end
+            %                     end
+            %                 end
+            %             end
+            
+        end
+    end
+    %     acorrs1(i,j,:) = ac1;
+    %     acorrs2(i,j,:) = ac2;
+    %     autoCorrs(i,j,:) = (ac1+ac2)/2;
+    xcorrsPairwise(i,:) = xc1;
+    
+end
+
+
+%
+%
+% for aa=1:numTrials
+%
+%     if nnz(ST1(aa,:))>0
+%
+%         div1=sum(ST1(aa,:)>(timeOffset) & ST1(aa,:)<(tmax));
+%         div2=sum(ST2(aa,:)>(timeOffset) & ST2(aa,:)<(tmax));
+%         for dd=1:nnz(ST1(aa,:))
+%             time=round(ST1(aa,dd));
+%
+%             if time>=(timeOffset) && time<=(tmax)
+%                     windowInds = time-span:time+span;
+%                     inds1 = makeValidInds(windowInds,tmax);
+%                     corrInds = windowInds(windowInds>0 & windowInds <=tmax) - time + span+1;
+%
+%                     ac1(corrInds)=ac1(corrInds)+(inst1(aa,inds1)-mean(inst1(aa,inds1)))/(div1*numTrials);
+%                     ac1all(aa,corrInds)=ac1all(aa,corrInds)+(inst1(aa,inds1)-mean(inst1(aa,inds1)))/(div1);
+%                     if nnz(inst2(aa,inds1))>0
+%                     xc(corrInds)=xc(corrInds)+(inst2(aa,inds1)-(mean(inst2(aa,inds1))))/(div2*numTrials);
+%                     xcall(aa,corrInds)=xcall(aa,corrInds)+(inst2(aa,inds1)-(mean(inst2(aa,inds1))))/(div2);
+%                     end
+%             end
+%         end
+%     end
+%
+%     if nnz(ST2(aa,:))>0
+%         div1=sum(ST2(aa,:)>(timeOffset) & ST2(aa,:)<(tmax));
+%         div2=sum(ST1(aa,:)>(timeOffset) & ST1(aa,:)<(tmax));
+%
+%         for dd=1:nnz(ST2(aa,:))
+%             time=round(ST2(aa,dd));
+%
+%             if time>=(timeOffset) && time<=(tmax)
+%                     windowInds = time-span:time+span;
+%                     inds1 = makeValidInds(windowInds,tmax);
+%                     corrInds = windowInds(windowInds>0 & windowInds <=tmax) - time + span+1;
+%
+%                 ac2(corrInds)=ac2(corrInds)+(inst2(aa,inds1)-mean(inst2(aa,inds1)))/(div1*numTrials);
+%                 ac2all(aa,corrInds)=ac2all(aa,corrInds)+(inst2(aa,inds1)-mean(inst2(aa,inds1)))/(div1);
+%                 if nnz(inst1(aa,inds1))>0
+%                 xc(corrInds)=xc(corrInds)+(inst1(aa,inds1)-mean(inst1(aa,inds1)))/(div2*numTrials);
+%                 xcall(aa,corrInds)=xcall(aa,corrInds)+(inst1(aa,inds1)-mean(inst1(aa,inds1)))/(div2);
+%                 end
+%             end
+%         end
+%     end
+%
+%
+% end
+%
+% xc=xc/2;
+% xcall=xcall/2;
+%
+% xc=(xc1+xc2)/2;
+% xcall=xcall/2;
+%
+%
+% end
