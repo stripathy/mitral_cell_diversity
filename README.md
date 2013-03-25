@@ -5,4 +5,4 @@ Matlab code used to perform analyses and figures for exploration of role of mitr
 
 All code is provided AS IS and no promises are made by the authors of the code working or compiling on your machine.
 
-Good Luck.
+Please contact Shreejoy Tripathy (stripat3@gmail.com) with questions or concerns.
